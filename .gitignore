@@ -1,0 +1,33 @@
+# Node dependencies
+node_modules/
+*/node_modules/
+
+# Environment files - strictly exclude real credentials
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Production builds
+dist/
+build/
+frontend/dist/
+
+# Uploaded media assets (keep directory structure via .gitkeep)
+backend/uploads/lessons/*
+!backend/uploads/lessons/.gitkeep
+backend/uploads/reels/*
+!backend/uploads/reels/.gitkeep
+
+# System and editor files
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+.vscode/
+.idea/
