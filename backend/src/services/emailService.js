@@ -11,6 +11,9 @@ function getTransporter() {
         user: smtpUser,
         pass: smtpPass,
       },
+      connectionTimeout: 5000,
+      greetingTimeout: 5000,
+      socketTimeout: 5000,
     }),
     smtpUser,
   };

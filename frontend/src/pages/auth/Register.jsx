@@ -103,8 +103,10 @@ export default function Register() {
       setOtp("");
     } catch (err) {
       const serverMsg =
-        err.response?.data?.messages?.join(", ") ||
         err.response?.data?.error ||
+        err.response?.data?.messages?.join(", ") ||
+        (err.code === "ECONNABORTED" ? "Server request timed out. Please try again." : null) ||
+        err.message ||
         "Registration could not be completed.";
       setError(formatFriendlyError(serverMsg));
     } finally {
