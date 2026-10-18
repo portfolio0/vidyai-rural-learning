@@ -475,3 +475,52 @@ exports.resetPassword = async (req, res) => {
     res.status(500).json({ error: getFriendlyErrorMessage(err) });
   }
 };
+
+/**
+ * Diagnostic Endpoint:
+ * Allows directly verifying Gmail SMTP credentials and network connectivity from a browser
+ */
+exports.testEmailDiagnostic = async (req, res) => {
+  const smtpUser = process.env.SMTP_USER || 'onkarnanvare5554@gmail.com';
+  const smtpPass = process.env.SMTP_PASS;
+
+  console.log(`[SMTP DIAGNOSTIC] Initiated. User: ${smtpUser}, Pass Set: ${!!smtpPass}, Pass Length: ${smtpPass?.length}`);
+
+  if (!smtpPass) {
+    return res.status(500).json({
+      status: 'error',
+      message: 'SMTP_PASS environment variable is missing in Render!',
+      action_needed: 'Go to Render Dashboard -> Environment -> Add SMTP_PASS with your 16-character Google App Password.',
+      smtpUser,
+    });
+  }
+
+  const testRecipient = req.query.email || smtpUser;
+  const testOtp = Math.floor(100000 + Math.random() * 900000).toString();
+
+  try {
+    const result = await emailService.sendVerificationEmail({
+      to: testRecipient,
+      name: 'Render Diagnostic Test',
+      otp: testOtp,
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: `Diagnostic email successfully sent to ${testRecipient}!`,
+      smtpUser,
+      recipient: testRecipient,
+      otpSent: testOtp,
+      result,
+    });
+  } catch (err) {
+    console.error('[SMTP DIAGNOSTIC ERROR]', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Email dispatch failed from Render server',
+      errorMessage: err.message,
+      smtpUser,
+      tip: 'Verify that your 16-character Google App Password is correct and 2-step verification is active.',
+    });
+  }
+};

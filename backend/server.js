@@ -97,6 +97,8 @@ app.use('/api/sync',          require('./src/routes/sync'));
 app.use('/api/notifications', require('./src/routes/notification'));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
+app.get('/api', (req, res) => res.json({ status: 'ok', service: 'VidyAI API', version: '1.0.0' }));
+app.get('/', (req, res) => res.json({ status: 'ok', service: 'VidyAI Backend API', frontend: 'https://vidyai-rural-learning.vercel.app' }));
 
 // 404 Handler for API endpoints
 app.use('/api/*', (req, res) => {
