@@ -12,6 +12,7 @@ export default function ForgotPassword() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [devOtpNotice, setDevOtpNotice] = useState('');
   const nav = useNavigate();
 
   const handleRequestOtp = async (e) => {
@@ -25,7 +26,14 @@ export default function ForgotPassword() {
       const { data } = await api.post('/auth/forgot-password', {
         email: email.trim(),
       });
-      setSuccessMsg(data.message || 'Recovery code sent! Please check your email inbox.');
+      if (data?.devOtp) {
+        setOtp(data.devOtp);
+        setDevOtpNotice(data.notice || 'Render free tier blocks SMTP port 465. Recovery code auto-filled!');
+        setSuccessMsg('Recovery code generated and auto-filled below!');
+      } else {
+        setDevOtpNotice('');
+        setSuccessMsg(data.message || 'Recovery code sent! Please check your email inbox.');
+      }
       setStep(2);
     } catch (err) {
       const msg =
@@ -213,6 +221,30 @@ export default function ForgotPassword() {
           </form>
         ) : (
           <form onSubmit={handleResetPassword}>
+            {devOtpNotice && (
+              <div
+                style={{
+                  background: '#FFFBEB',
+                  border: '1px solid #FCD34D',
+                  borderRadius: '14px',
+                  padding: '12px 14px',
+                  marginBottom: '16px',
+                  fontSize: '13px',
+                  color: '#92400E',
+                  lineHeight: 1.5,
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: '2px' }}>
+                  💡 Immediate Recovery (Render Free Tier)
+                </div>
+                <div>
+                  Cloud SMTP is firewalled on Render. Your code is:{' '}
+                  <strong style={{ fontSize: '16px', letterSpacing: '2px', color: '#B45309' }}>{otp}</strong>
+                  <br />
+                  (Pre-filled below — enter new password to reset)
+                </div>
+              </div>
+            )}
             <div style={{ marginBottom: '16px' }}>
               <label
                 htmlFor="reset-otp"

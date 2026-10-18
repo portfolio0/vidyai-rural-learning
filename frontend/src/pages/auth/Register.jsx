@@ -20,6 +20,7 @@ export default function Register() {
   const [countdown, setCountdown] = useState(30);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+  const [devOtpNotice, setDevOtpNotice] = useState("");
   const nav = useNavigate();
 
   // Countdown timer for Resend OTP button
@@ -95,12 +96,23 @@ export default function Register() {
         ...(form.role === "student" && { class: Number(form.class) }),
       };
 
-      await api.post("/auth/register", payload);
+      const res = await api.post("/auth/register", payload);
 
-      setSuccessMsg("Verification code sent to your email!");
+      if (res.data?.devOtp) {
+        setOtp(res.data.devOtp);
+        setDevOtpNotice(
+          res.data.notice ||
+            "Render free tier blocks SMTP port 465. Code auto-filled for instant verification!"
+        );
+        setSuccessMsg("Account registered! Your verification code is ready below.");
+      } else {
+        setOtp("");
+        setDevOtpNotice("");
+        setSuccessMsg("Verification code sent to your email!");
+      }
+
       setStep("verify");
       setCountdown(30);
-      setOtp("");
     } catch (err) {
       const serverMsg =
         err.response?.data?.error ||
@@ -159,10 +171,19 @@ export default function Register() {
     setResending(true);
 
     try {
-      await api.post("/auth/resend-otp", {
+      const res = await api.post("/auth/resend-otp", {
         email: form.email.trim(),
       });
-      setSuccessMsg("A fresh verification code has been sent to your email!");
+      if (res.data?.devOtp) {
+        setOtp(res.data.devOtp);
+        setDevOtpNotice(
+          res.data.notice ||
+            "Render free tier blocks SMTP port 465. New code auto-filled!"
+        );
+        setSuccessMsg("New verification code generated and ready below!");
+      } else {
+        setSuccessMsg("A fresh verification code has been sent to your email!");
+      }
       setCountdown(30);
     } catch (err) {
       const serverMsg =
@@ -472,25 +493,50 @@ export default function Register() {
         ) : (
           /* STEP 2: EMAIL OTP VERIFICATION */
           <form onSubmit={handleVerifyOTP}>
-            <div
-              style={{
-                background: "#F0FDF4",
-                border: "1px solid #BBF7D0",
-                borderRadius: "14px",
-                padding: "14px 16px",
-                marginBottom: "20px",
-                fontSize: "13px",
-                color: "#166534",
-                lineHeight: 1.5,
-              }}
-            >
-              <div style={{ fontWeight: 700, marginBottom: "4px" }}>
-                📩 Code Sent via Email Service
+            {devOtpNotice ? (
+              <div
+                style={{
+                  background: "#FFFBEB",
+                  border: "1px solid #FCD34D",
+                  borderRadius: "14px",
+                  padding: "14px 16px",
+                  marginBottom: "20px",
+                  fontSize: "13px",
+                  color: "#92400E",
+                  lineHeight: 1.5,
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: "4px" }}>
+                  💡 Immediate Verification (Render Free Tier)
+                </div>
+                <div>
+                  Cloud SMTP ports are firewalled on Render free tier. Your verification code is:{" "}
+                  <strong style={{ fontSize: "16px", letterSpacing: "2px", color: "#B45309" }}>{otp}</strong>
+                  <br />
+                  (Code auto-filled below — click <strong>Verify & Go to Login</strong> to complete registration!)
+                </div>
               </div>
-              <div>
-                We sent a 6-digit verification code to <strong>{form.email}</strong>. Please check your inbox or spam folder.
+            ) : (
+              <div
+                style={{
+                  background: "#F0FDF4",
+                  border: "1px solid #BBF7D0",
+                  borderRadius: "14px",
+                  padding: "14px 16px",
+                  marginBottom: "20px",
+                  fontSize: "13px",
+                  color: "#166534",
+                  lineHeight: 1.5,
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: "4px" }}>
+                  📩 Code Sent via Email Service
+                </div>
+                <div>
+                  We sent a 6-digit verification code to <strong>{form.email}</strong>. Please check your inbox or spam folder.
+                </div>
               </div>
-            </div>
+            )}
 
             <div style={{ marginBottom: "20px" }}>
               <label htmlFor="reg-otp" style={labelStyle}>
