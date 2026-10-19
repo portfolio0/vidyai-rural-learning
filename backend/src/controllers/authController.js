@@ -9,6 +9,8 @@ const emailService = require('../services/emailService');
 const signToken   = (p) => jwt.sign(p, process.env.JWT_SECRET,    { expiresIn: '15m' });
 const signRefresh = (p) => jwt.sign(p, process.env.REFRESH_SECRET, { expiresIn: '30d' });
 
+const makeReqId = () => `auth_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+
 /**
  * Helper to produce clean, user-friendly error messages from database or validation errors
  */
@@ -35,16 +37,25 @@ const getFriendlyErrorMessage = (err) => {
  * and send a 6-digit OTP to the user's email via Gmail SMTP / email service.
  */
 exports.register = async (req, res) => {
+  const reqId = makeReqId();
+  const startTime = Date.now();
+  console.log(`\n[AUTH-DEBUG] [${reqId}] 📥 POST /api/auth/register started at ${new Date().toISOString()}`);
+  console.log(`[AUTH-DEBUG] [${reqId}] Origin: ${req.headers.origin || 'unknown'} | IP: ${req.ip}`);
+
   try {
     const { name, email, phone, password, role, class: cls, language } = req.body;
     const normalizedEmail = email ? email.toLowerCase().trim() : null;
+    console.log(`[AUTH-DEBUG] [${reqId}] Payload: email=${normalizedEmail}, name=${name?.trim()}, role=${role}, phone=${phone || 'none'}`);
+
     if (!normalizedEmail) {
+      console.warn(`[AUTH-DEBUG] [${reqId}] ⚠️ Validation failed: missing email`);
       return res.status(400).json({ error: 'Email address is required.' });
     }
 
     // 1. Check if email is already registered
     const existingEmail = await User.findOne({ email: normalizedEmail });
     if (existingEmail) {
+      console.warn(`[AUTH-DEBUG] [${reqId}] ⚠️ Conflict: Email ${normalizedEmail} already registered`);
       return res.status(409).json({
         error: 'This email is already registered. Please log in or use a different email.',
       });
@@ -55,6 +66,7 @@ exports.register = async (req, res) => {
     if (cleanPhone) {
       const existingPhone = await User.findOne({ phone: cleanPhone });
       if (existingPhone) {
+        console.warn(`[AUTH-DEBUG] [${reqId}] ⚠️ Conflict: Phone ${cleanPhone} already in use`);
         return res.status(409).json({
           error: 'This mobile number is already in use. Please try a different number or log in.',
         });
@@ -68,7 +80,9 @@ exports.register = async (req, res) => {
 
     // 3. Generate 6-digit OTP and store pending registration data in MongoDB
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const tHash = Date.now();
     const hashedPassword = await bcrypt.hash(password, 12);
+    console.log(`[AUTH-DEBUG] [${reqId}] Password hashed in ${Date.now() - tHash}ms`);
 
     await PendingRegistration.findOneAndUpdate(
       { email: normalizedEmail },
@@ -89,10 +103,12 @@ exports.register = async (req, res) => {
       },
       { upsert: true, new: true }
     );
+    console.log(`[AUTH-DEBUG] [${reqId}] PendingRegistration saved in MongoDB Atlas`);
 
     // 4. Send verification email via email service (with resilient non-blocking fallback)
     let emailSent = false;
     let emailFailureReason = null;
+    const tEmail = Date.now();
     try {
       await emailService.sendVerificationEmail({
         to: normalizedEmail,
@@ -100,13 +116,17 @@ exports.register = async (req, res) => {
         otp,
       });
       emailSent = true;
+      console.log(`[AUTH-DEBUG] [${reqId}] Email dispatch succeeded in ${Date.now() - tEmail}ms`);
     } catch (emailErr) {
       emailFailureReason = emailErr.message;
-      console.warn(`\n[EMAIL NOTICE] Email delivery to ${normalizedEmail} could not complete: ${emailErr.message}`);
+      console.warn(`[AUTH-DEBUG] [${reqId}] Email dispatch notice (${Date.now() - tEmail}ms): ${emailErr.message}`);
       console.log(`======================================================`);
       console.log(`🔑 [VERIFICATION CODE FOR ${normalizedEmail}]: ${otp}`);
-      console.log(`======================================================\n`);
+      console.log(`======================================================`);
     }
+
+    const totalDuration = Date.now() - startTime;
+    console.log(`[AUTH-DEBUG] [${reqId}] 📤 Response 200 returned in ${totalDuration}ms (emailSent: ${emailSent})\n`);
 
     res.status(200).json({
       message: emailSent
@@ -119,10 +139,28 @@ exports.register = async (req, res) => {
         devOtp: otp,
         notice: 'Render Free Tier blocks outbound SMTP. Your verification code is provided below to complete sign up.',
       }),
+      debug: {
+        requestId: reqId,
+        durationMs: totalDuration,
+        emailStatus: emailSent ? 'delivered' : 'fallback_otp',
+        providerInfo: emailService.getProviderStatus(),
+        emailError: emailFailureReason || null,
+        serverTime: new Date().toISOString(),
+      },
     });
   } catch (err) {
-    console.error('[REGISTER ERROR]', err);
-    res.status(400).json({ error: getFriendlyErrorMessage(err) });
+    const totalDuration = Date.now() - startTime;
+    console.error(`[AUTH-DEBUG] [${reqId}] ❌ Registration failed in ${totalDuration}ms:`, err);
+    res.status(400).json({
+      error: getFriendlyErrorMessage(err),
+      debug: {
+        requestId: reqId,
+        durationMs: totalDuration,
+        errorName: err.name,
+        errorMessage: err.message,
+        serverTime: new Date().toISOString(),
+      },
+    });
   }
 };
 
@@ -131,9 +169,15 @@ exports.register = async (req, res) => {
  * Resends the 6-digit OTP to the pending registration's email address with a 30s rate limit.
  */
 exports.resendEmailOTP = async (req, res) => {
+  const reqId = makeReqId();
+  const startTime = Date.now();
+  console.log(`\n[AUTH-DEBUG] [${reqId}] 📥 POST /api/auth/resend-otp started at ${new Date().toISOString()}`);
+
   try {
     const { email } = req.body;
     const normalizedEmail = email ? email.toLowerCase().trim() : null;
+    console.log(`[AUTH-DEBUG] [${reqId}] Resending code for email: ${normalizedEmail}`);
+
     if (!normalizedEmail) {
       return res.status(400).json({ error: 'Email address is required.' });
     }
@@ -160,6 +204,8 @@ exports.resendEmailOTP = async (req, res) => {
     await pending.save();
 
     let emailSent = false;
+    let emailFailureReason = null;
+    const tEmail = Date.now();
     try {
       await emailService.sendVerificationEmail({
         to: normalizedEmail,
@@ -167,12 +213,17 @@ exports.resendEmailOTP = async (req, res) => {
         otp,
       });
       emailSent = true;
+      console.log(`[AUTH-DEBUG] [${reqId}] Resend email succeeded in ${Date.now() - tEmail}ms`);
     } catch (emailErr) {
-      console.warn(`\n[EMAIL NOTICE] Resend email to ${normalizedEmail} could not complete: ${emailErr.message}`);
+      emailFailureReason = emailErr.message;
+      console.warn(`[AUTH-DEBUG] [${reqId}] Resend email notice (${Date.now() - tEmail}ms): ${emailErr.message}`);
       console.log(`======================================================`);
       console.log(`🔑 [RESEND VERIFICATION CODE FOR ${normalizedEmail}]: ${otp}`);
       console.log(`======================================================\n`);
     }
+
+    const totalDuration = Date.now() - startTime;
+    console.log(`[AUTH-DEBUG] [${reqId}] 📤 Resend OTP response sent in ${totalDuration}ms\n`);
 
     res.status(200).json({
       message: emailSent
@@ -185,10 +236,27 @@ exports.resendEmailOTP = async (req, res) => {
         devOtp: otp,
         notice: 'Render Free Tier blocks outbound SMTP. Your new verification code is provided below.',
       }),
+      debug: {
+        requestId: reqId,
+        durationMs: totalDuration,
+        emailStatus: emailSent ? 'delivered' : 'fallback_otp',
+        providerInfo: emailService.getProviderStatus(),
+        emailError: emailFailureReason || null,
+        serverTime: new Date().toISOString(),
+      },
     });
   } catch (err) {
-    console.error('[RESEND OTP ERROR]', err);
-    res.status(500).json({ error: getFriendlyErrorMessage(err) });
+    const totalDuration = Date.now() - startTime;
+    console.error(`[AUTH-DEBUG] [${reqId}] ❌ Resend OTP error in ${totalDuration}ms:`, err);
+    res.status(500).json({
+      error: getFriendlyErrorMessage(err),
+      debug: {
+        requestId: reqId,
+        durationMs: totalDuration,
+        errorName: err.name,
+        errorMessage: err.message,
+      },
+    });
   }
 };
 
@@ -198,17 +266,24 @@ exports.resendEmailOTP = async (req, res) => {
  * the user can proceed to the login section.
  */
 exports.verifyEmailOTP = async (req, res) => {
+  const reqId = makeReqId();
+  const startTime = Date.now();
+  console.log(`\n[AUTH-DEBUG] [${reqId}] 📥 POST /api/auth/verify-email started at ${new Date().toISOString()}`);
+
   try {
     const { email, otp } = req.body;
     const normalizedEmail = email ? email.toLowerCase().trim() : null;
     const cleanOtp = otp ? String(otp).trim() : null;
+    console.log(`[AUTH-DEBUG] [${reqId}] Verifying code for email: ${normalizedEmail}`);
 
     if (!normalizedEmail || !cleanOtp) {
+      console.warn(`[AUTH-DEBUG] [${reqId}] ⚠️ Missing email or OTP`);
       return res.status(400).json({ error: 'Email address and 6-digit code are required.' });
     }
 
     const pending = await PendingRegistration.findOne({ email: normalizedEmail });
     if (!pending) {
+      console.warn(`[AUTH-DEBUG] [${reqId}] ⚠️ No pending registration found for ${normalizedEmail}`);
       return res.status(400).json({
         error: 'No pending verification found or code expired. Please register again.',
       });
@@ -217,6 +292,7 @@ exports.verifyEmailOTP = async (req, res) => {
     const isValid = pending.otp === cleanOtp;
     if (!isValid) {
       pending.attempts = (pending.attempts || 0) + 1;
+      console.warn(`[AUTH-DEBUG] [${reqId}] ⚠️ Incorrect OTP attempt ${pending.attempts} for ${normalizedEmail}`);
       if (pending.attempts >= 5) {
         await PendingRegistration.deleteOne({ email: normalizedEmail });
         return res.status(429).json({
@@ -266,6 +342,9 @@ exports.verifyEmailOTP = async (req, res) => {
       await Student.create({ userId: user._id, class: userData.class || 5 });
     }
 
+    const totalDuration = Date.now() - startTime;
+    console.log(`[AUTH-DEBUG] [${reqId}] ✅ User created in MongoDB Atlas in ${totalDuration}ms (userId: ${user._id})\n`);
+
     res.status(201).json({
       message: 'Email verified successfully! You can now log in with your credentials.',
       verified: true,
@@ -275,22 +354,45 @@ exports.verifyEmailOTP = async (req, res) => {
         email: user.email,
         role: user.role,
       },
+      debug: {
+        requestId: reqId,
+        durationMs: totalDuration,
+        userId: user._id,
+        serverTime: new Date().toISOString(),
+      },
     });
   } catch (err) {
-    console.error('[VERIFY EMAIL ERROR]', err);
-    res.status(400).json({ error: getFriendlyErrorMessage(err) });
+    const totalDuration = Date.now() - startTime;
+    console.error(`[AUTH-DEBUG] [${reqId}] ❌ Verify email failed in ${totalDuration}ms:`, err);
+    res.status(400).json({
+      error: getFriendlyErrorMessage(err),
+      debug: {
+        requestId: reqId,
+        durationMs: totalDuration,
+        errorName: err.name,
+        errorMessage: err.message,
+        serverTime: new Date().toISOString(),
+      },
+    });
   }
 };
 
 exports.login = async (req, res) => {
+  const reqId = makeReqId();
+  const startTime = Date.now();
+  console.log(`\n[AUTH-DEBUG] [${reqId}] 📥 POST /api/auth/login started at ${new Date().toISOString()}`);
+
   try {
     const { email, password } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
     const normalizedEmail = email.toLowerCase().trim();
+    console.log(`[AUTH-DEBUG] [${reqId}] Login attempt for email: ${normalizedEmail}`);
+
     const user = await User.findOne({ email: normalizedEmail });
     if (!user || !(await user.checkPassword(password))) {
+      console.warn(`[AUTH-DEBUG] [${reqId}] ⚠️ Login failed: invalid credentials for ${normalizedEmail}`);
       return res.status(401).json({ error: 'Invalid email or password. Please try again.' });
     }
 
@@ -314,6 +416,10 @@ exports.login = async (req, res) => {
       secure: isProduction,
       maxAge: 30 * 24 * 60 * 60 * 1000,
     });
+
+    const totalDuration = Date.now() - startTime;
+    console.log(`[AUTH-DEBUG] [${reqId}] ✅ Login successful in ${totalDuration}ms (userId: ${user._id}, role: ${user.role})\n`);
+
     res.json({
       token,
       user: {
@@ -324,9 +430,16 @@ exports.login = async (req, res) => {
         language: user.language,
         class: student?.class || 5,
       },
+      debug: {
+        requestId: reqId,
+        durationMs: totalDuration,
+        role: user.role,
+        serverTime: new Date().toISOString(),
+      },
     });
   } catch (err) {
-    console.error('[LOGIN ERROR]', err);
+    const totalDuration = Date.now() - startTime;
+    console.error(`[AUTH-DEBUG] [${reqId}] ❌ Login error in ${totalDuration}ms:`, err);
     res.status(500).json({ error: getFriendlyErrorMessage(err) });
   }
 };
@@ -387,16 +500,22 @@ exports.getMe = async (req, res) => {
 };
 
 exports.forgotPassword = async (req, res) => {
+  const reqId = makeReqId();
+  const startTime = Date.now();
+  console.log(`\n[AUTH-DEBUG] [${reqId}] 📥 POST /api/auth/forgot-password started at ${new Date().toISOString()}`);
+
   try {
     const { email } = req.body;
     const normalizedEmail = email ? email.toLowerCase().trim() : null;
+    console.log(`[AUTH-DEBUG] [${reqId}] Password recovery requested for: ${normalizedEmail}`);
+
     if (!normalizedEmail) {
       return res.status(400).json({ error: 'Email address is required.' });
     }
 
     const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
-      // Return success message to prevent user enumeration attacks
+      console.warn(`[AUTH-DEBUG] [${reqId}] ⚠️ Email ${normalizedEmail} not found, returning generic success for security`);
       return res.status(200).json({
         message: 'If an account exists with this email, a 6-digit recovery code has been sent.',
       });
@@ -411,6 +530,8 @@ exports.forgotPassword = async (req, res) => {
     );
 
     let emailSent = false;
+    let emailFailureReason = null;
+    const tEmail = Date.now();
     try {
       await emailService.sendPasswordResetEmail({
         to: normalizedEmail,
@@ -418,12 +539,17 @@ exports.forgotPassword = async (req, res) => {
         otp,
       });
       emailSent = true;
+      console.log(`[AUTH-DEBUG] [${reqId}] Password reset email sent in ${Date.now() - tEmail}ms`);
     } catch (emailErr) {
-      console.warn(`\n[EMAIL NOTICE] Password recovery email to ${normalizedEmail} could not complete: ${emailErr.message}`);
+      emailFailureReason = emailErr.message;
+      console.warn(`[AUTH-DEBUG] [${reqId}] Password reset email notice (${Date.now() - tEmail}ms): ${emailErr.message}`);
       console.log(`======================================================`);
       console.log(`🔑 [RECOVERY CODE FOR ${normalizedEmail}]: ${otp}`);
       console.log(`======================================================\n`);
     }
+
+    const totalDuration = Date.now() - startTime;
+    console.log(`[AUTH-DEBUG] [${reqId}] 📤 Recovery code generated in ${totalDuration}ms\n`);
 
     res.status(200).json({
       message: 'If an account exists with this email, a 6-digit recovery code has been sent.',
@@ -434,9 +560,18 @@ exports.forgotPassword = async (req, res) => {
         devOtp: otp,
         notice: 'Render Free Tier blocks outbound SMTP. Your recovery code is provided below.',
       }),
+      debug: {
+        requestId: reqId,
+        durationMs: totalDuration,
+        emailStatus: emailSent ? 'delivered' : 'fallback_otp',
+        providerInfo: emailService.getProviderStatus(),
+        emailError: emailFailureReason || null,
+        serverTime: new Date().toISOString(),
+      },
     });
   } catch (err) {
-    console.error('[FORGOT PASSWORD ERROR]', err);
+    const totalDuration = Date.now() - startTime;
+    console.error(`[AUTH-DEBUG] [${reqId}] ❌ Forgot password error in ${totalDuration}ms:`, err);
     res.status(500).json({ error: getFriendlyErrorMessage(err) });
   }
 };

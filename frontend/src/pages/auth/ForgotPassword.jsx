@@ -13,6 +13,7 @@ export default function ForgotPassword() {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [devOtpNotice, setDevOtpNotice] = useState('');
+  const [debugDetails, setDebugDetails] = useState(null);
   const nav = useNavigate();
 
   const handleRequestOtp = async (e) => {
@@ -22,6 +23,7 @@ export default function ForgotPassword() {
     setLoading(true);
     setError('');
     setSuccessMsg('');
+    setDebugDetails(null);
     try {
       const { data } = await api.post('/auth/forgot-password', {
         email: email.trim(),
@@ -36,11 +38,23 @@ export default function ForgotPassword() {
       }
       setStep(2);
     } catch (err) {
+      console.error('[FORGOT PASSWORD ERROR]', err);
       const msg =
         err.response?.data?.messages?.join(', ') ||
         err.response?.data?.error ||
+        (err.code === 'ECONNABORTED' ? 'Server request timed out. Please try again.' : null) ||
+        err.message ||
         'Unable to send recovery code. Please check your email and try again.';
       setError(msg);
+
+      setDebugDetails({
+        status: err.response?.status || 'NO_RESPONSE',
+        code: err.code || 'ERR_NETWORK',
+        message: err.message,
+        serverData: err.response?.data || null,
+        url: err.config?.url || '/auth/forgot-password',
+        time: new Date().toLocaleTimeString(),
+      });
     } finally {
       setLoading(false);
     }
@@ -150,13 +164,32 @@ export default function ForgotPassword() {
               fontSize: '13px',
               fontWeight: 600,
               marginBottom: '18px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
             }}
           >
-            <span>⚠️</span>
-            <span>{error}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>⚠️</span>
+              <span>{error}</span>
+            </div>
+            {debugDetails && (
+              <details style={{ marginTop: '8px', fontSize: '11px', fontWeight: 400, color: '#991B1B', cursor: 'pointer' }}>
+                <summary style={{ fontWeight: 700 }}>🔍 Technical Debug Info (Click to view)</summary>
+                <pre
+                  style={{
+                    margin: '6px 0 0',
+                    padding: '8px',
+                    background: 'rgba(255,255,255,0.75)',
+                    borderRadius: '8px',
+                    overflowX: 'auto',
+                    fontSize: '11px',
+                    fontFamily: 'monospace',
+                    color: '#7F1D1D',
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {JSON.stringify(debugDetails, null, 2)}
+                </pre>
+              </details>
+            )}
           </div>
         )}
 

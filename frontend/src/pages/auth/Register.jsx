@@ -21,6 +21,7 @@ export default function Register() {
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [devOtpNotice, setDevOtpNotice] = useState("");
+  const [debugDetails, setDebugDetails] = useState(null);
   const nav = useNavigate();
 
   // Countdown timer for Resend OTP button
@@ -85,6 +86,10 @@ export default function Register() {
     }
 
     setLoading(true);
+    setError("");
+    setSuccessMsg("");
+    setDebugDetails(null);
+
     try {
       const payload = {
         name: form.name.trim(),
@@ -96,7 +101,9 @@ export default function Register() {
         ...(form.role === "student" && { class: Number(form.class) }),
       };
 
+      console.log("[REGISTER ATTEMPT] Sending registration payload:", { ...payload, password: "••••••" });
       const res = await api.post("/auth/register", payload);
+      console.log("[REGISTER SUCCESS] Server responded:", res.data);
 
       if (res.data?.devOtp) {
         setOtp(res.data.devOtp);
@@ -114,6 +121,7 @@ export default function Register() {
       setStep("verify");
       setCountdown(30);
     } catch (err) {
+      console.error("[REGISTER ERROR DETECTED]", err);
       const serverMsg =
         err.response?.data?.error ||
         err.response?.data?.messages?.join(", ") ||
@@ -121,6 +129,15 @@ export default function Register() {
         err.message ||
         "Registration could not be completed.";
       setError(formatFriendlyError(serverMsg));
+
+      setDebugDetails({
+        status: err.response?.status || "NO_RESPONSE",
+        code: err.code || "ERR_NETWORK",
+        message: err.message,
+        serverData: err.response?.data || null,
+        url: err.config?.url || "/auth/register",
+        time: new Date().toLocaleTimeString(),
+      });
     } finally {
       setLoading(false);
     }
@@ -270,13 +287,32 @@ export default function Register() {
               fontSize: "13px",
               fontWeight: 600,
               marginBottom: "16px",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
             }}
           >
-            <span>⚠️</span>
-            <span>{error}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span>⚠️</span>
+              <span>{error}</span>
+            </div>
+            {debugDetails && (
+              <details style={{ marginTop: "8px", fontSize: "11px", fontWeight: 400, color: "#991B1B", cursor: "pointer" }}>
+                <summary style={{ fontWeight: 700 }}>🔍 Technical Debug Info (Click to view)</summary>
+                <pre
+                  style={{
+                    margin: "6px 0 0",
+                    padding: "8px",
+                    background: "rgba(255,255,255,0.75)",
+                    borderRadius: "8px",
+                    overflowX: "auto",
+                    fontSize: "11px",
+                    fontFamily: "monospace",
+                    color: "#7F1D1D",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {JSON.stringify(debugDetails, null, 2)}
+                </pre>
+              </details>
+            )}
           </div>
         )}
 

@@ -181,7 +181,17 @@ async function dispatchEmail({ to, name, subject, html, text }) {
     }
   }
 
-  // 3. Gmail SMTP (Port 465)
+  // 3. Render Free Tier detection: outbound SMTP ports (25, 465, 587) are firewalled by Render.
+  // Bypass 4s socket hang unless explicit permission/paid SMTP is enabled.
+  const isRender = process.env.RENDER === 'true' || !!process.env.RENDER_SERVICE_ID;
+  const allowRenderSmtp = process.env.ENABLE_RENDER_SMTP === 'true' || process.env.SMTP_ENABLED === 'true';
+
+  if (isRender && !allowRenderSmtp) {
+    console.warn(`[EMAIL DEBUG] Render Free Tier environment detected. Outbound TCP on SMTP port 465 is firewalled by Render. Instant fallback OTP activated.`);
+    throw new Error('Render Free Tier blocks outbound SMTP ports (465/587). Instant fallback active.');
+  }
+
+  // 4. Gmail SMTP (Port 465)
   const smtp = getSmtpTransporter();
   if (smtp) {
     try {
@@ -205,6 +215,24 @@ async function dispatchEmail({ to, name, subject, html, text }) {
 
   throw new Error('No email service configured (requires BREVO_API_KEY, RESEND_API_KEY, or SMTP_PASS)');
 }
+
+/**
+ * Returns current email provider diagnostics and environment info
+ */
+exports.getProviderStatus = () => {
+  const isRender = process.env.RENDER === 'true' || !!process.env.RENDER_SERVICE_ID;
+  const brevoKey = process.env.BREVO_API_KEY || process.env.SENDINBLUE_API_KEY;
+  const resendKey = process.env.RESEND_API_KEY;
+  const smtpPass = process.env.SMTP_PASS;
+
+  if (brevoKey) return { activeProvider: 'brevo_https', isRender, mode: 'live_https' };
+  if (resendKey) return { activeProvider: 'resend_https', isRender, mode: 'live_https' };
+  if (isRender && process.env.ENABLE_RENDER_SMTP !== 'true') {
+    return { activeProvider: 'none_render_smtp_blocked', isRender, mode: 'instant_fallback_otp' };
+  }
+  if (smtpPass) return { activeProvider: 'gmail_smtp', isRender, mode: 'smtp_direct' };
+  return { activeProvider: 'none', isRender, mode: 'unconfigured' };
+};
 
 /**
  * Sends a 6-digit verification code to recipient.
