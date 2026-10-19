@@ -163,12 +163,15 @@ function getSmtpTransporter() {
  * 3. Tries Gmail SMTP (port 465) if configured
  */
 async function dispatchEmail({ to, name, subject, html, text }) {
+  let lastProviderError = null;
+
   // 1. Brevo REST API (HTTPS Port 443)
   if (process.env.BREVO_API_KEY || process.env.SENDINBLUE_API_KEY) {
     try {
       return await sendViaBrevo({ to, name, subject, html, text });
     } catch (err) {
-      console.warn(`[BREVO API NOTICE] ${err.message}. Trying next available provider...`);
+      lastProviderError = err;
+      console.warn(`[BREVO API NOTICE] ${err.message}`);
     }
   }
 
@@ -177,8 +180,14 @@ async function dispatchEmail({ to, name, subject, html, text }) {
     try {
       return await sendViaResend({ to, subject, html });
     } catch (err) {
-      console.warn(`[RESEND API NOTICE] ${err.message}. Trying next available provider...`);
+      lastProviderError = err;
+      console.warn(`[RESEND API NOTICE] ${err.message}`);
     }
+  }
+
+  // If an HTTPS API provider was configured but returned an error, report the real provider error
+  if (lastProviderError) {
+    throw new Error(`Email API error: ${lastProviderError.message}`);
   }
 
   // 3. Render Free Tier detection: outbound SMTP ports (25, 465, 587) are firewalled by Render.
