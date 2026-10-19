@@ -199,13 +199,18 @@ router.post("/invite-teacher", protect, requireRole("admin"), async (req, res) =
       { status: "revoked" }
     );
 
+    const adminId = req.user?.userId || req.user?._id;
+    if (!adminId) {
+      return res.status(401).json({ error: "Invalid admin session. Please log in again." });
+    }
+
     // 4. Create new TeacherInvite
     const invite = await TeacherInvite.create({
       email: normalizedEmail,
       token,
       name: name ? name.trim() : "",
       school: school ? school.trim() : "",
-      invitedBy: req.user._id,
+      invitedBy: adminId,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
     });
 
@@ -220,13 +225,17 @@ router.post("/invite-teacher", protect, requireRole("admin"), async (req, res) =
     // 6. Dispatch invitation email via Brevo HTTPS API
     let emailSent = false;
     let emailNotice = null;
+    let adminName = "School Administrator";
     try {
+      const adminDoc = await User.findById(adminId).select("name");
+      if (adminDoc?.name) adminName = adminDoc.name;
+
       await emailService.sendTeacherInvitationEmail({
         to: normalizedEmail,
         name: name ? name.trim() : "Educator",
         inviteUrl,
         schoolName: school ? school.trim() : "",
-        adminName: req.user.name || "School Administrator",
+        adminName,
       });
       emailSent = true;
     } catch (err) {
