@@ -6,6 +6,7 @@ const PendingRegistration = require('../models/PendingRegistration');
 const PasswordReset = require('../models/PasswordReset');
 const TeacherInvite = require('../models/TeacherInvite');
 const emailService = require('../services/emailService');
+const { validateEmailDeliverability } = require('../services/emailValidator');
 
 const signToken   = (p) => jwt.sign(p, process.env.JWT_SECRET,    { expiresIn: '15m' });
 const signRefresh = (p) => jwt.sign(p, process.env.REFRESH_SECRET, { expiresIn: '30d' });
@@ -51,6 +52,13 @@ exports.register = async (req, res) => {
     if (!normalizedEmail) {
       console.warn(`[AUTH-DEBUG] [${reqId}] ⚠️ Validation failed: missing email`);
       return res.status(400).json({ error: 'Email address is required.' });
+    }
+
+    // 0. Verify that the email domain actually exists, is not disposable, and can receive mail
+    const deliverability = await validateEmailDeliverability(normalizedEmail);
+    if (!deliverability.isValid) {
+      console.warn(`[AUTH-DEBUG] [${reqId}] ⚠️ Deliverability check rejected: ${normalizedEmail} - ${deliverability.error}`);
+      return res.status(400).json({ error: deliverability.error });
     }
 
     // 1. Check if email is already registered
@@ -169,7 +177,19 @@ exports.register = async (req, res) => {
     }
 
     const totalDuration = Date.now() - startTime;
-    console.log(`[AUTH-DEBUG] [${reqId}] 📤 Response 200 returned in ${totalDuration}ms (emailSent: ${emailSent})\n`);
+    console.log(`[AUTH-DEBUG] [${reqId}] 📤 Email result in ${totalDuration}ms (emailSent: ${emailSent})\n`);
+
+    if (!emailSent && process.env.ALLOW_DEV_OTP !== 'true' && process.env.NODE_ENV !== 'test') {
+      await PendingRegistration.deleteOne({ email: normalizedEmail });
+      return res.status(502).json({
+        error: `Could not deliver verification email to ${normalizedEmail}. Please ensure the email address is active, spelled correctly, and able to receive incoming mail.`,
+        debug: {
+          requestId: reqId,
+          durationMs: totalDuration,
+          emailError: emailFailureReason || null,
+        },
+      });
+    }
 
     res.status(200).json({
       message: emailSent
@@ -178,9 +198,9 @@ exports.register = async (req, res) => {
       email: normalizedEmail,
       expiresIn: 600,
       emailSent,
-      ...(!emailSent && {
+      ...((!emailSent && (process.env.ALLOW_DEV_OTP === 'true' || process.env.NODE_ENV === 'test')) && {
         devOtp: otp,
-        notice: 'Render Free Tier blocks outbound SMTP. Your verification code is provided below to complete sign up.',
+        notice: 'Test mode: verification code provided for automated testing.',
       }),
       debug: {
         requestId: reqId,
@@ -268,6 +288,12 @@ exports.resendEmailOTP = async (req, res) => {
     const totalDuration = Date.now() - startTime;
     console.log(`[AUTH-DEBUG] [${reqId}] 📤 Resend OTP response sent in ${totalDuration}ms\n`);
 
+    if (!emailSent && process.env.ALLOW_DEV_OTP !== 'true' && process.env.NODE_ENV !== 'test') {
+      return res.status(502).json({
+        error: `Could not send verification code to ${normalizedEmail}. Please ensure the email address is able to receive incoming mail.`,
+      });
+    }
+
     res.status(200).json({
       message: emailSent
         ? 'A new verification code has been sent to your email.'
@@ -275,9 +301,9 @@ exports.resendEmailOTP = async (req, res) => {
       email: normalizedEmail,
       expiresIn: 600,
       emailSent,
-      ...(!emailSent && {
+      ...((!emailSent && (process.env.ALLOW_DEV_OTP === 'true' || process.env.NODE_ENV === 'test')) && {
         devOtp: otp,
-        notice: 'Render Free Tier blocks outbound SMTP. Your new verification code is provided below.',
+        notice: 'Test mode: new verification code provided.',
       }),
       debug: {
         requestId: reqId,
@@ -562,6 +588,12 @@ exports.forgotPassword = async (req, res) => {
 
     if (!normalizedEmail) {
       return res.status(400).json({ error: 'Email address is required.' });
+    }
+
+    // Validate email deliverability
+    const deliverability = await validateEmailDeliverability(normalizedEmail);
+    if (!deliverability.isValid) {
+      return res.status(400).json({ error: deliverability.error });
     }
 
     const user = await User.findOne({ email: normalizedEmail });

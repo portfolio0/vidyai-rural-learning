@@ -9,6 +9,7 @@ const Reel = require("../models/Reel");
 const Notification = require("../models/Notification");
 const TeacherInvite = require("../models/TeacherInvite");
 const emailService = require("../services/emailService");
+const { validateEmailDeliverability } = require("../services/emailValidator");
 
 // GET /api/admin/dashboard
 router.get("/dashboard", protect, requireRole("admin"), async (req, res) => {
@@ -176,6 +177,12 @@ router.post("/invite-teacher", protect, requireRole("admin"), async (req, res) =
       return res.status(400).json({ error: "Teacher email address is required" });
     }
     const normalizedEmail = email.toLowerCase().trim();
+
+    // 0. Validate that the email has an active domain and is not fake/disposable
+    const deliverability = await validateEmailDeliverability(normalizedEmail);
+    if (!deliverability.isValid) {
+      return res.status(400).json({ error: deliverability.error });
+    }
 
     // 1. Check if user already exists
     const existingUser = await User.findOne({ email: normalizedEmail });

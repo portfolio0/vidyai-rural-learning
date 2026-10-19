@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const path = require('path');
 
+process.env.NODE_ENV = 'test';
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 const User = require('../src/models/User');
@@ -23,6 +24,7 @@ const TeacherInvite = require('../src/models/TeacherInvite');
 const { SYSTEM_BADGES } = require('../src/services/badgeService');
 const { awardStudentXP } = require('../src/services/gamificationService');
 const { validateFileSafety, deleteMediaFile } = require('../src/services/storageService');
+const { validateEmailDeliverability } = require('../src/services/emailValidator');
 const bcrypt = require('bcryptjs');
 
 const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/vidyaiv1';
@@ -812,6 +814,29 @@ describe('VidyAI Full-Stack Architecture & Security Test Suite', () => {
     assert.strictEqual(verifiedInvite.status, 'used');
     assert.strictEqual(verifiedInvite.usedBy.toString(), newTeacher._id.toString());
   });
+
+  // ── TEST 22: Deliverability Validation ───────────────────────────
+  test('22. Deliverability: DNS MX check rejects non-existent domains, typos, and disposable emails', async () => {
+    // 1. Non-existent domain
+    const fakeDomainRes = await validateEmailDeliverability('user@domainthatdefinitelydoesnotexist12345.xyz');
+    assert.strictEqual(fakeDomainRes.isValid, false);
+    assert.match(fakeDomainRes.error, /does not exist/i);
+
+    // 2. Typo domain
+    const typoRes = await validateEmailDeliverability('student@gamil.com');
+    assert.strictEqual(typoRes.isValid, false);
+    assert.match(typoRes.error, /Did you mean '@gmail\.com'/);
+
+    // 3. Disposable email domain
+    const disposableRes = await validateEmailDeliverability('fakeuser@mailinator.com');
+    assert.strictEqual(disposableRes.isValid, false);
+    assert.match(disposableRes.error, /Disposable or temporary/i);
+
+    // 4. Test domain (bypassed in test environment)
+    const testDomainRes = await validateEmailDeliverability('student@test-vidyai.org');
+    assert.strictEqual(testDomainRes.isValid, true);
+  });
 });
+
 
 
