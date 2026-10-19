@@ -1,4 +1,5 @@
 const router = require("express").Router();
+const crypto = require("crypto");
 const { protect, requireRole } = require("../middleware/auth");
 const User = require("../models/User");
 const Course = require("../models/Course");
@@ -6,6 +7,8 @@ const QuizResult = require("../models/QuizResult");
 const Progress = require("../models/Progress");
 const Reel = require("../models/Reel");
 const Notification = require("../models/Notification");
+const TeacherInvite = require("../models/TeacherInvite");
+const emailService = require("../services/emailService");
 
 // GET /api/admin/dashboard
 router.get("/dashboard", protect, requireRole("admin"), async (req, res) => {
@@ -165,4 +168,123 @@ router.post("/schools", protect, requireRole("admin"), async (req, res) => {
   }
 });
 
+// POST /api/admin/invite-teacher
+router.post("/invite-teacher", protect, requireRole("admin"), async (req, res) => {
+  try {
+    const { email, name, school } = req.body;
+    if (!email || !email.trim()) {
+      return res.status(400).json({ error: "Teacher email address is required" });
+    }
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // 1. Check if user already exists
+    const existingUser = await User.findOne({ email: normalizedEmail });
+    if (existingUser) {
+      if (existingUser.role === "teacher") {
+        return res.status(409).json({
+          error: "A user is already registered as a teacher with this email address.",
+        });
+      }
+      return res.status(409).json({
+        error: `An account already exists with this email with role: "${existingUser.role}". You can change their role to Teacher directly in User Management.`,
+      });
+    }
+
+    // 2. Generate secure 24-byte invite token
+    const token = crypto.randomBytes(24).toString("hex");
+
+    // 3. Invalidate previous pending invites for this email
+    await TeacherInvite.updateMany(
+      { email: normalizedEmail, status: "pending" },
+      { status: "revoked" }
+    );
+
+    // 4. Create new TeacherInvite
+    const invite = await TeacherInvite.create({
+      email: normalizedEmail,
+      token,
+      name: name ? name.trim() : "",
+      school: school ? school.trim() : "",
+      invitedBy: req.user._id,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+    });
+
+    // 5. Build full invite URL
+    const clientUrl =
+      process.env.FRONTEND_URL ||
+      (process.env.NODE_ENV === "production"
+        ? "https://vidyai-rural-learning.vercel.app"
+        : "http://localhost:3000");
+    const inviteUrl = `${clientUrl.replace(/\/$/, "")}/register?invite=${token}`;
+
+    // 6. Dispatch invitation email via Brevo HTTPS API
+    let emailSent = false;
+    let emailNotice = null;
+    try {
+      await emailService.sendTeacherInvitationEmail({
+        to: normalizedEmail,
+        name: name ? name.trim() : "Educator",
+        inviteUrl,
+        schoolName: school ? school.trim() : "",
+        adminName: req.user.name || "School Administrator",
+      });
+      emailSent = true;
+    } catch (err) {
+      emailNotice = err.message;
+      console.warn(`[TEACHER-INVITE NOTICE] Email delivery: ${err.message}`);
+    }
+
+    res.status(201).json({
+      message: emailSent
+        ? `Invitation email dispatched to ${normalizedEmail}!`
+        : `Invitation created! You can copy and share the invite link directly.`,
+      inviteUrl,
+      emailSent,
+      emailNotice,
+      invite: {
+        _id: invite._id,
+        email: invite.email,
+        name: invite.name,
+        school: invite.school,
+        status: invite.status,
+        expiresAt: invite.expiresAt,
+        createdAt: invite.createdAt,
+      },
+    });
+  } catch (e) {
+    console.error("[ADMIN INVITE TEACHER ERROR]", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/admin/teacher-invites
+router.get("/teacher-invites", protect, requireRole("admin"), async (req, res) => {
+  try {
+    const invites = await TeacherInvite.find()
+      .sort({ createdAt: -1 })
+      .populate("invitedBy", "name email")
+      .populate("usedBy", "name email")
+      .limit(50);
+    res.json({ invites });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/admin/teacher-invites/:id
+router.delete("/teacher-invites/:id", protect, requireRole("admin"), async (req, res) => {
+  try {
+    const invite = await TeacherInvite.findById(req.params.id);
+    if (!invite) {
+      return res.status(404).json({ error: "Invitation not found" });
+    }
+    invite.status = "revoked";
+    await invite.save();
+    res.json({ message: "Teacher invitation revoked successfully", invite });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
+

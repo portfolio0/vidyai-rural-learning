@@ -29,6 +29,7 @@ exports.schemas = {
     class: Joi.number().min(1).max(10).optional(),
     language: Joi.string().valid("en", "mr", "hi").default("en"),
     teacherCode: Joi.string().optional().allow("", null),
+    inviteToken: Joi.string().optional().allow("", null),
   }),
   login: Joi.object({
     email: Joi.string().email().required(),

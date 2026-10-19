@@ -1,8 +1,11 @@
 import { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import api from "../../services/api";
 
 export default function Register() {
+  const [searchParams] = useSearchParams();
+  const inviteToken = searchParams.get("invite");
+
   const [step, setStep] = useState("form"); // 'form' | 'verify'
   const [form, setForm] = useState({
     name: "",
@@ -22,6 +25,11 @@ export default function Register() {
   const [successMsg, setSuccessMsg] = useState("");
   const [devOtpNotice, setDevOtpNotice] = useState("");
   const [debugDetails, setDebugDetails] = useState(null);
+
+  // Teacher Invitation state
+  const [inviteValidating, setInviteValidating] = useState(false);
+  const [inviteData, setInviteData] = useState(null);
+  const [inviteError, setInviteError] = useState("");
   const nav = useNavigate();
 
   // Countdown timer for Resend OTP button
@@ -32,6 +40,42 @@ export default function Register() {
     }
     return () => clearInterval(timer);
   }, [step, countdown]);
+
+  // Validate teacher invitation token on mount if provided in URL
+  useEffect(() => {
+    if (!inviteToken) return;
+
+    let isMounted = true;
+    setInviteValidating(true);
+    setInviteError("");
+
+    api
+      .get(`/auth/verify-teacher-invite?token=${encodeURIComponent(inviteToken.trim())}`)
+      .then((res) => {
+        if (!isMounted) return;
+        setInviteData(res.data);
+        setForm((prev) => ({
+          ...prev,
+          email: res.data.email || prev.email,
+          name: res.data.name || prev.name,
+          role: "teacher",
+        }));
+        setInviteValidating(false);
+      })
+      .catch((err) => {
+        if (!isMounted) return;
+        const msg =
+          err.response?.data?.error ||
+          "This teacher invitation link is invalid or has expired. Please contact your administrator.";
+        setInviteError(msg);
+        setInviteValidating(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [inviteToken]);
+
 
   const set = (k) => (e) => {
     setError("");
@@ -85,6 +129,14 @@ export default function Register() {
       return setError("Please enter a valid 10-digit mobile number, or leave it blank.");
     }
 
+    if (form.role === "teacher" && !inviteToken) {
+      return setError("Teacher registration requires an official invitation link sent by a school administrator.");
+    }
+
+    if (inviteError) {
+      return setError("Cannot register: " + inviteError);
+    }
+
     setLoading(true);
     setError("");
     setSuccessMsg("");
@@ -99,7 +151,9 @@ export default function Register() {
         language: form.language,
         ...(cleanPhone && { phone: cleanPhone }),
         ...(form.role === "student" && { class: Number(form.class) }),
+        ...(form.role === "teacher" && inviteToken && { inviteToken: inviteToken.trim() }),
       };
+
 
       console.log("[REGISTER ATTEMPT] Sending registration payload:", { ...payload, password: "••••••" });
       const res = await api.post("/auth/register", payload);
@@ -338,6 +392,71 @@ export default function Register() {
           </div>
         )}
 
+        {/* Teacher Invitation Notice Banner */}
+        {inviteValidating && (
+          <div
+            style={{
+              background: "#EFF6FF",
+              border: "1px solid #BFDBFE",
+              color: "#1D4ED8",
+              borderRadius: "12px",
+              padding: "12px 14px",
+              fontSize: "13px",
+              fontWeight: 600,
+              marginBottom: "16px",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <span>⏳</span>
+            <span>Verifying teacher invitation link...</span>
+          </div>
+        )}
+
+        {inviteError && (
+          <div
+            style={{
+              background: "#FEE2E2",
+              border: "1px solid #FCA5A5",
+              color: "#DC2626",
+              borderRadius: "12px",
+              padding: "12px 14px",
+              fontSize: "13px",
+              fontWeight: 600,
+              marginBottom: "16px",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <span>⚠️</span>
+            <span>{inviteError}</span>
+          </div>
+        )}
+
+        {inviteData?.valid && (
+          <div
+            style={{
+              background: "#ECFDF5",
+              border: "1.5px solid #6EE7B7",
+              color: "#065F46",
+              borderRadius: "14px",
+              padding: "14px 16px",
+              fontSize: "13px",
+              marginBottom: "18px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, fontSize: "14px", marginBottom: "4px" }}>
+              <span>🎓</span>
+              <span>Verified Teacher Invitation</span>
+            </div>
+            <div style={{ color: "#047857", lineHeight: 1.5 }}>
+              You have been invited by <strong>{inviteData.invitedBy}</strong> to join VidyAI as a Teacher{inviteData.school ? ` for ${inviteData.school}` : ""}.
+            </div>
+          </div>
+        )}
+
         {/* STEP 1: REGISTRATION FORM */}
         {step === "form" ? (
           <form onSubmit={handleRegisterSubmit}>
@@ -360,20 +479,36 @@ export default function Register() {
 
             {/* Field: Email Address */}
             <div style={{ marginBottom: "14px" }}>
-              <label htmlFor="reg-email" style={labelStyle}>
-                Email Address <span style={{ color: "#EF4444" }}>*</span>
-              </label>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                <label htmlFor="reg-email" style={{ ...labelStyle, marginBottom: 0 }}>
+                  Email Address <span style={{ color: "#EF4444" }}>*</span>
+                </label>
+                {inviteData?.valid && (
+                  <span style={{ fontSize: "11px", fontWeight: 700, color: "#059669", background: "#DCFCE7", padding: "2px 8px", borderRadius: "10px" }}>
+                    🔒 Locked to Invited Email
+                  </span>
+                )}
+              </div>
               <input
                 id="reg-email"
                 type="email"
                 autoComplete="email"
                 value={form.email}
-                onChange={set("email")}
+                onChange={inviteData?.valid ? undefined : set("email")}
+                readOnly={Boolean(inviteData?.valid)}
                 placeholder="e.g. rahul@example.com"
                 required
-                style={inputStyle}
+                style={{
+                  ...inputStyle,
+                  ...(inviteData?.valid && {
+                    background: "#F9FAFB",
+                    cursor: "not-allowed",
+                    color: "#374151",
+                    borderColor: "#A7F3D0",
+                  }),
+                }}
                 onFocus={(e) => (e.target.style.borderColor = "#22C55E")}
-                onBlur={(e) => (e.target.style.borderColor = "#E5E7EB")}
+                onBlur={(e) => (e.target.style.borderColor = inviteData?.valid ? "#A7F3D0" : "#E5E7EB")}
               />
             </div>
 
@@ -449,19 +584,37 @@ export default function Register() {
               <label htmlFor="reg-role" style={labelStyle}>
                 I am a <span style={{ color: "#EF4444" }}>*</span>
               </label>
-              <select
-                id="reg-role"
-                value={form.role}
-                onChange={set("role")}
-                style={inputStyle}
-                onFocus={(e) => (e.target.style.borderColor = "#22C55E")}
-                onBlur={(e) => (e.target.style.borderColor = "#E5E7EB")}
-              >
-                <option value="student">👦 Student</option>
-                <option value="teacher">👩‍🏫 Teacher</option>
-                <option value="parent">👨‍👩‍👧 Parent</option>
-              </select>
+              {inviteData?.valid ? (
+                <div
+                  style={{
+                    ...inputStyle,
+                    background: "#F0FDF4",
+                    border: "1.5px solid #86EFAC",
+                    color: "#166534",
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  <span>👩‍🏫</span>
+                  <span>Teacher (Official Invitation Verified)</span>
+                </div>
+              ) : (
+                <select
+                  id="reg-role"
+                  value={form.role}
+                  onChange={set("role")}
+                  style={inputStyle}
+                  onFocus={(e) => (e.target.style.borderColor = "#22C55E")}
+                  onBlur={(e) => (e.target.style.borderColor = "#E5E7EB")}
+                >
+                  <option value="student">👦 Student</option>
+                  <option value="parent">👨‍👩‍👧 Parent</option>
+                </select>
+              )}
             </div>
+
 
             {/* Field: Class (only for students) */}
             {form.role === "student" && (

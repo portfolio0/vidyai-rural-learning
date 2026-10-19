@@ -352,3 +352,77 @@ exports.sendPasswordResetEmail = async ({ to, name, otp }) => {
     text: `Your VidyAI password reset code is: ${otp}. Valid for 10 minutes.`,
   });
 };
+
+/**
+ * Sends an official teacher registration invitation link.
+ */
+exports.sendTeacherInvitationEmail = async ({ to, name, inviteUrl, schoolName, adminName }) => {
+  const subject = `Invitation: Join VidyAI as a Teacher${schoolName ? ` (${schoolName})` : ''}`;
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Teacher Invitation - VidyAI</title>
+    </head>
+    <body style="margin: 0; padding: 24px; background-color: #F3F4F6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+      <table width="100%" border="0" cellspacing="0" cellpadding="0">
+        <tr>
+          <td align="center">
+            <table width="100%" style="max-width: 520px; background: #ffffff; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.06);">
+              <tr>
+                <td style="background: linear-gradient(135deg, #10B981, #059669); padding: 36px 24px; text-align: center; color: #ffffff;">
+                  <div style="font-size: 46px; margin-bottom: 8px;">👩‍🏫</div>
+                  <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 0.5px;">Teacher Invitation</h1>
+                  <p style="margin: 6px 0 0; font-size: 14px; opacity: 0.95;">VidyAI Rural Learning Platform</p>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding: 32px 28px;">
+                  <h2 style="color: #1F2937; margin: 0 0 12px; font-size: 19px; font-weight: 700;">
+                    Hello ${name ? name : 'Educator'},
+                  </h2>
+                  <p style="color: #4B5563; font-size: 15px; line-height: 1.6; margin: 0 0 18px;">
+                    ${adminName ? `<strong>${adminName}</strong> has invited you` : 'You have been invited'} to join the <strong>VidyAI</strong> platform as a verified <strong>Teacher</strong>${schoolName ? ` for <strong>${schoolName}</strong>` : ''}.
+                  </p>
+                  <p style="color: #4B5563; font-size: 14px; line-height: 1.6; margin: 0 0 24px;">
+                    As a verified teacher, you can create interactive lessons, publish video reels, assign quizzes, and track your students' learning progress.
+                  </p>
+
+                  <div style="text-align: center; margin: 30px 0;">
+                    <a href="${inviteUrl}" target="_blank" style="display: inline-block; background: #10B981; color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 700; padding: 14px 32px; border-radius: 12px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);">
+                      Accept Invitation & Register
+                    </a>
+                  </div>
+
+                  <p style="color: #6B7280; font-size: 13px; line-height: 1.5; margin: 24px 0 8px;">
+                    Or copy and paste this link into your browser:
+                  </p>
+                  <div style="background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 8px; padding: 10px 12px; font-family: monospace; font-size: 12px; color: #059669; word-break: break-all;">
+                    ${inviteUrl}
+                  </div>
+
+                  <hr style="border: none; border-top: 1px solid #F3F4F6; margin: 28px 0 16px;" />
+                  <p style="color: #9CA3AF; font-size: 12px; margin: 0; line-height: 1.5;">
+                    ⏱️ This invitation link is valid for 7 days. If you were not expecting this invitation, you can safely ignore this email.
+                  </p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+  `;
+
+  return await dispatchEmail({
+    to,
+    name,
+    subject,
+    html,
+    text: `You have been invited to join VidyAI as a Teacher. Click or copy this link to register: ${inviteUrl} (Valid for 7 days).`,
+  });
+};
+

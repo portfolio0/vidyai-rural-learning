@@ -4,6 +4,7 @@ const User = require('../models/User');
 const Student = require('../models/Student');
 const PendingRegistration = require('../models/PendingRegistration');
 const PasswordReset = require('../models/PasswordReset');
+const TeacherInvite = require('../models/TeacherInvite');
 const emailService = require('../services/emailService');
 
 const signToken   = (p) => jwt.sign(p, process.env.JWT_SECRET,    { expiresIn: '15m' });
@@ -43,9 +44,9 @@ exports.register = async (req, res) => {
   console.log(`[AUTH-DEBUG] [${reqId}] Origin: ${req.headers.origin || 'unknown'} | IP: ${req.ip}`);
 
   try {
-    const { name, email, phone, password, role, class: cls, language } = req.body;
+    const { name, email, phone, password, role = 'student', class: cls, language, inviteToken } = req.body;
     const normalizedEmail = email ? email.toLowerCase().trim() : null;
-    console.log(`[AUTH-DEBUG] [${reqId}] Payload: email=${normalizedEmail}, name=${name?.trim()}, role=${role}, phone=${phone || 'none'}`);
+    console.log(`[AUTH-DEBUG] [${reqId}] Payload: email=${normalizedEmail}, name=${name?.trim()}, role=${role}, phone=${phone || 'none'}, inviteToken=${inviteToken ? 'provided' : 'none'}`);
 
     if (!normalizedEmail) {
       console.warn(`[AUTH-DEBUG] [${reqId}] ⚠️ Validation failed: missing email`);
@@ -78,6 +79,47 @@ exports.register = async (req, res) => {
       return res.status(403).json({ error: 'Administrative accounts cannot be self-registered.' });
     }
 
+    // Restrict Teacher registration: Requires a valid admin invitation token
+    let verifiedInvite = null;
+    if (role === 'teacher') {
+      if (!inviteToken || !inviteToken.trim()) {
+        return res.status(403).json({
+          error: 'Teacher registration requires an official invitation link sent by a school administrator.',
+        });
+      }
+
+      verifiedInvite = await TeacherInvite.findOne({ token: inviteToken.trim() });
+      if (!verifiedInvite) {
+        return res.status(403).json({
+          error: 'Invalid teacher invitation link. Please request an invitation from your school administrator.',
+        });
+      }
+
+      if (verifiedInvite.status === 'used') {
+        return res.status(410).json({
+          error: 'This teacher invitation link has already been used. Please log in or request a new invitation.',
+        });
+      }
+
+      if (verifiedInvite.status === 'revoked') {
+        return res.status(403).json({
+          error: 'This teacher invitation link has been revoked by an administrator.',
+        });
+      }
+
+      if (verifiedInvite.expiresAt < new Date()) {
+        return res.status(410).json({
+          error: 'This teacher invitation link has expired. Please ask your administrator to send a new invitation.',
+        });
+      }
+
+      if (verifiedInvite.email.toLowerCase() !== normalizedEmail) {
+        return res.status(403).json({
+          error: `This invitation was issued specifically for ${verifiedInvite.email}. Please register with that email address.`,
+        });
+      }
+    }
+
     // 3. Generate 6-digit OTP and store pending registration data in MongoDB
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const tHash = Date.now();
@@ -98,6 +140,7 @@ exports.register = async (req, res) => {
           role,
           class: cls || 5,
           language: language || 'en',
+          inviteToken: verifiedInvite ? verifiedInvite.token : undefined,
         },
         createdAt: new Date(),
       },
@@ -340,6 +383,14 @@ exports.verifyEmailOTP = async (req, res) => {
 
     if (user.role === 'student') {
       await Student.create({ userId: user._id, class: userData.class || 5 });
+    }
+
+    if (user.role === 'teacher' && userData.inviteToken) {
+      await TeacherInvite.updateOne(
+        { token: userData.inviteToken },
+        { status: 'used', usedAt: new Date(), usedBy: user._id }
+      );
+      console.log(`[AUTH-DEBUG] [${reqId}] TeacherInvite ${userData.inviteToken} marked as USED for user ${user._id}`);
     }
 
     const totalDuration = Date.now() - startTime;
@@ -678,5 +729,64 @@ exports.testEmailDiagnostic = async (req, res) => {
         realEmailsFromRender: 'To deliver real emails to Gmail inboxes from Render, sign up for a free Brevo account (300 free emails/day at brevo.com) and add BREVO_API_KEY to Render Environment Variables.',
       },
     });
+  }
+};
+
+/**
+ * GET /api/auth/verify-teacher-invite?token=...
+ * Validates a teacher invitation token before registration
+ */
+exports.verifyTeacherInvite = async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token || !token.trim()) {
+      return res.status(400).json({ valid: false, error: 'Invitation token is required.' });
+    }
+
+    const invite = await TeacherInvite.findOne({ token: token.trim() }).populate('invitedBy', 'name email');
+    if (!invite) {
+      return res.status(404).json({ valid: false, error: 'Invitation not found or invalid link.' });
+    }
+
+    if (invite.status === 'used') {
+      return res.status(410).json({
+        valid: false,
+        error: 'This invitation link has already been used to create an account. Please log in directly.',
+      });
+    }
+
+    if (invite.status === 'revoked') {
+      return res.status(403).json({
+        valid: false,
+        error: 'This invitation link has been revoked by an administrator.',
+      });
+    }
+
+    if (invite.expiresAt < new Date()) {
+      return res.status(410).json({
+        valid: false,
+        error: 'This invitation link has expired. Please ask your administrator to send a new invitation.',
+      });
+    }
+
+    // Check if an account already exists with this email
+    const existing = await User.findOne({ email: invite.email });
+    if (existing) {
+      return res.status(409).json({
+        valid: false,
+        error: 'An account is already registered with this email address. Please log in directly.',
+      });
+    }
+
+    res.json({
+      valid: true,
+      email: invite.email,
+      name: invite.name || '',
+      school: invite.school || '',
+      invitedBy: invite.invitedBy?.name || 'School Administrator',
+      expiresAt: invite.expiresAt,
+    });
+  } catch (err) {
+    res.status(500).json({ valid: false, error: err.message });
   }
 };

@@ -19,6 +19,7 @@ const QuizResult = require('../src/models/QuizResult');
 const School = require('../src/models/School');
 const SyncQueue = require('../src/models/SyncQueue');
 const PasswordReset = require('../src/models/PasswordReset');
+const TeacherInvite = require('../src/models/TeacherInvite');
 const { SYSTEM_BADGES } = require('../src/services/badgeService');
 const { awardStudentXP } = require('../src/services/gamificationService');
 const { validateFileSafety, deleteMediaFile } = require('../src/services/storageService');
@@ -43,6 +44,7 @@ describe('VidyAI Full-Stack Architecture & Security Test Suite', () => {
     // Clean up any existing test records
     await User.deleteMany({ email: { $regex: /@test-vidyai\.org$/ } });
     await PendingRegistration.deleteMany({ email: { $regex: /@test-vidyai\.org$/ } });
+    await TeacherInvite.deleteMany({ email: { $regex: /@test-vidyai\.org$/ } });
     await Course.deleteMany({ title: 'Integration Test Course' });
     await Lesson.deleteMany({ title: 'Integration Test Lesson' });
     await Assignment.deleteMany({ title: 'Integration Test Assignment' });
@@ -754,5 +756,62 @@ describe('VidyAI Full-Stack Architecture & Security Test Suite', () => {
     const assignments = await Assignment.find({ class: testStudentUser.class }).lean();
     assert.ok(Array.isArray(assignments), 'Assignments query must succeed');
   });
+
+  // ── TEST 21: Teacher Invitation and Access Governance ─────────────
+  test('21. Security: Teacher registration strictly enforces admin TeacherInvite tokens and lifecycle', async () => {
+    const inviteEmail = 'invited-teacher@test-vidyai.org';
+    const testAdmin = await User.create({
+      name: 'System Admin',
+      email: 'sysadmin@test-vidyai.org',
+      password: 'password123',
+      role: 'admin',
+      isEmailVerified: true,
+    });
+
+    // 1. Admin issues an invitation
+    const invite = await TeacherInvite.create({
+      email: inviteEmail,
+      token: 'secure_test_token_778899',
+      name: 'Invited Teacher',
+      school: 'Zilla Parishad School',
+      invitedBy: testAdmin._id,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+    assert.strictEqual(invite.status, 'pending');
+
+    // 2. Pending registration with valid invite token
+    const pending = await PendingRegistration.create({
+      email: inviteEmail,
+      otp: '123456',
+      userData: {
+        name: 'Invited Teacher',
+        email: inviteEmail,
+        password: 'hashedpassword',
+        role: 'teacher',
+        inviteToken: invite.token,
+      },
+    });
+    assert.ok(pending, 'PendingRegistration with inviteToken must be created');
+    assert.strictEqual(pending.userData.inviteToken, 'secure_test_token_778899');
+
+    // 3. Verification creates teacher user and marks invite as 'used'
+    const newTeacher = await User.create({
+      name: pending.userData.name,
+      email: pending.userData.email,
+      passwordHash: pending.userData.password,
+      role: pending.userData.role,
+      isEmailVerified: true,
+    });
+
+    await TeacherInvite.updateOne(
+      { token: pending.userData.inviteToken },
+      { status: 'used', usedAt: new Date(), usedBy: newTeacher._id }
+    );
+
+    const verifiedInvite = await TeacherInvite.findOne({ token: invite.token });
+    assert.strictEqual(verifiedInvite.status, 'used');
+    assert.strictEqual(verifiedInvite.usedBy.toString(), newTeacher._id.toString());
+  });
 });
+
 

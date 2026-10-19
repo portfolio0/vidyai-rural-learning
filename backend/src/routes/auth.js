@@ -16,6 +16,7 @@ router.get('/register', (req, res) => {
 });
 
 router.get('/test-email', ctrl.testEmailDiagnostic);
+router.get('/verify-teacher-invite', ctrl.verifyTeacherInvite);
 
 router.post('/register',        authLimiter, validate(schemas.register),       ctrl.register);
 router.post('/verify-email',    authLimiter, validate(schemas.verifyEmail),    ctrl.verifyEmailOTP);

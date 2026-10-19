@@ -12,6 +12,7 @@ const PendingRegistrationSchema = new mongoose.Schema(
       role: { type: String, required: true },
       class: { type: Number, default: 5 },
       language: { type: String, default: 'en' },
+      inviteToken: { type: String },
     },
     attempts: { type: Number, default: 0 },
     createdAt: { type: Date, default: Date.now, expires: 600 }, // Auto-deletes after 10 minutes

@@ -32,10 +32,72 @@ export default function AdminDashboard() {
   const [broadcastSending, setBroadcastSending] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
 
+  // Teacher Invite state
+  const [inviteForm, setInviteForm] = useState({ email: "", name: "", school: "" });
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteResult, setInviteResult] = useState(null);
+  const [invitesList, setInvitesList] = useState([]);
+  const [invitesLoading, setInvitesLoading] = useState(false);
+  const [copiedToken, setCopiedToken] = useState(null);
+
+  const loadInvites = async () => {
+    setInvitesLoading(true);
+    try {
+      const res = await api.get("/admin/teacher-invites");
+      setInvitesList(res.data.invites || []);
+    } catch (e) {
+      console.error(e.message);
+    } finally {
+      setInvitesLoading(false);
+    }
+  };
+
+  const openInviteModal = () => {
+    setActiveModal("inviteTeacher");
+    setInviteResult(null);
+    setInviteForm({ email: "", name: "", school: "" });
+    loadInvites();
+  };
+
+  const handleSendTeacherInvite = async (e) => {
+    e.preventDefault();
+    if (!inviteForm.email.trim()) return;
+    setInviteLoading(true);
+    try {
+      const res = await api.post("/admin/invite-teacher", inviteForm);
+      setInviteResult(res.data);
+      showToast(res.data.message || "Invitation created!");
+      loadInvites();
+      setInviteForm({ email: "", name: "", school: "" });
+    } catch (err) {
+      alert(err.response?.data?.error || "Failed to send teacher invitation");
+    } finally {
+      setInviteLoading(false);
+    }
+  };
+
+  const handleRevokeInvite = async (inviteId) => {
+    if (!window.confirm("Are you sure you want to revoke this teacher invitation link?")) return;
+    try {
+      await api.delete(`/admin/teacher-invites/${inviteId}`);
+      showToast("Invitation revoked");
+      loadInvites();
+    } catch (err) {
+      alert(err.response?.data?.error || "Failed to revoke invitation");
+    }
+  };
+
+  const copyToClipboard = (text, id) => {
+    navigator.clipboard.writeText(text);
+    setCopiedToken(id || "main");
+    setTimeout(() => setCopiedToken(null), 2500);
+  };
+
   const showToast = (msg) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(""), 3500);
   };
+
 
   const loadDashboard = () => {
     api
@@ -258,6 +320,12 @@ export default function AdminDashboard() {
         }}
       >
         {[
+          {
+            icon: "✉️",
+            title: "Invite Teacher",
+            desc: "Send registration link",
+            action: openInviteModal,
+          },
           {
             icon: "🛡️",
             title: "Content Moderation",
@@ -808,6 +876,354 @@ export default function AdminDashboard() {
           </div>,
           document.body,
         )}
+
+      {/* TEACHER INVITATION MODAL */}
+      {activeModal === "inviteTeacher" &&
+        createPortal(
+          <div
+            onClick={() => setActiveModal(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              width: "100vw",
+              height: "100vh",
+              background: "rgba(0,0,0,0.6)",
+              backdropFilter: "blur(8px)",
+              zIndex: 999999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "16px",
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "#fff",
+                borderRadius: "24px",
+                width: "100%",
+                maxWidth: "640px",
+                maxHeight: "90vh",
+                overflowY: "auto",
+                padding: "28px",
+                boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "20px",
+                }}
+              >
+                <div>
+                  <h2
+                    style={{
+                      margin: 0,
+                      fontSize: "20px",
+                      fontFamily: "Baloo 2, cursive",
+                      fontWeight: 800,
+                      color: "#1E1B4B",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <span>👩‍🏫</span>
+                    <span>Teacher Invitation Portal</span>
+                  </h2>
+                  <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#6B7280" }}>
+                    Send verified registration links to educators. Public self-registration for teachers is disabled.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setActiveModal(null)}
+                  style={{
+                    background: "#F3F4F6",
+                    border: "none",
+                    borderRadius: "50%",
+                    width: "36px",
+                    height: "36px",
+                    cursor: "pointer",
+                    fontSize: "18px",
+                    fontWeight: 700,
+                    color: "#6B7280",
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Invitation Creation Form */}
+              <form
+                onSubmit={handleSendTeacherInvite}
+                style={{
+                  background: "#F8FAFC",
+                  border: "1px solid #E2E8F0",
+                  borderRadius: "16px",
+                  padding: "18px",
+                  marginBottom: "24px",
+                }}
+              >
+                <div style={{ fontWeight: 700, fontSize: "14px", color: "#1E293B", marginBottom: "12px" }}>
+                  ✉️ Issue New Teacher Invitation
+                </div>
+
+                <div style={{ marginBottom: "12px" }}>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>
+                    Teacher Email Address <span style={{ color: "#EF4444" }}>*</span>
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="e.g. sunita.teacher@school.org"
+                    value={inviteForm.email}
+                    onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
+                    style={{
+                      width: "100%",
+                      padding: "10px 14px",
+                      borderRadius: "10px",
+                      border: "1px solid #CBD5E1",
+                      boxSizing: "border-box",
+                      fontSize: "13px",
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "14px" }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>
+                      Teacher Full Name (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Sunita Sharma"
+                      value={inviteForm.name}
+                      onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })}
+                      style={{
+                        width: "100%",
+                        padding: "10px 14px",
+                        borderRadius: "10px",
+                        border: "1px solid #CBD5E1",
+                        boxSizing: "border-box",
+                        fontSize: "13px",
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>
+                      School / Subject (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Z.P. High School / Science"
+                      value={inviteForm.school}
+                      onChange={(e) => setInviteForm({ ...inviteForm, school: e.target.value })}
+                      style={{
+                        width: "100%",
+                        padding: "10px 14px",
+                        borderRadius: "10px",
+                        border: "1px solid #CBD5E1",
+                        boxSizing: "border-box",
+                        fontSize: "13px",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={inviteLoading}
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    borderRadius: "12px",
+                    border: "none",
+                    background: inviteLoading ? "#94A3B8" : "#10B981",
+                    color: "#fff",
+                    fontWeight: 700,
+                    fontSize: "14px",
+                    cursor: inviteLoading ? "not-allowed" : "pointer",
+                    boxShadow: "0 4px 12px rgba(16,185,129,0.3)",
+                  }}
+                >
+                  {inviteLoading ? "Generating & Sending Invitation..." : "🚀 Send Teacher Invitation"}
+                </button>
+              </form>
+
+              {/* Success Result Banner & Quick Link Copy */}
+              {inviteResult && (
+                <div
+                  style={{
+                    background: "#ECFDF5",
+                    border: "1.5px solid #86EFAC",
+                    borderRadius: "16px",
+                    padding: "16px",
+                    marginBottom: "24px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, color: "#166534", fontSize: "14px", marginBottom: "8px" }}>
+                    <span>✅</span>
+                    <span>{inviteResult.message}</span>
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#15803D", marginBottom: "8px" }}>
+                    Share this unique registration link directly with the teacher via WhatsApp, SMS, or Email:
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <input
+                      type="text"
+                      readOnly
+                      value={inviteResult.inviteUrl}
+                      style={{
+                        flex: 1,
+                        padding: "8px 12px",
+                        borderRadius: "8px",
+                        border: "1px solid #86EFAC",
+                        background: "#fff",
+                        fontFamily: "monospace",
+                        fontSize: "12px",
+                        color: "#065F46",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(inviteResult.inviteUrl, "main")}
+                      style={{
+                        padding: "8px 16px",
+                        borderRadius: "8px",
+                        border: "none",
+                        background: copiedToken === "main" ? "#047857" : "#10B981",
+                        color: "#fff",
+                        fontWeight: 700,
+                        fontSize: "12px",
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {copiedToken === "main" ? "✓ Copied!" : "📋 Copy Link"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* List of Sent Invitations */}
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                  <div style={{ fontWeight: 800, fontSize: "15px", color: "#1E293B" }}>
+                    📋 Sent Teacher Invitations ({invitesList.length})
+                  </div>
+                  <button
+                    onClick={loadInvites}
+                    style={{ background: "none", border: "none", color: "#6C63FF", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+                  >
+                    🔄 Refresh
+                  </button>
+                </div>
+
+                {invitesLoading ? (
+                  <div style={{ textAlign: "center", padding: "20px", color: "#94A3B8", fontSize: "13px" }}>
+                    Loading invitations...
+                  </div>
+                ) : invitesList.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "24px", color: "#94A3B8", fontSize: "13px", background: "#F8FAFC", borderRadius: "12px" }}>
+                    No teacher invitations sent yet. Fill out the form above to invite your first teacher!
+                  </div>
+                ) : (
+                  <div style={{ maxHeight: "260px", overflowY: "auto", border: "1px solid #E2E8F0", borderRadius: "12px" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                      <thead>
+                        <tr style={{ background: "#F8FAFC", borderBottom: "1px solid #E2E8F0", textAlign: "left", color: "#64748B" }}>
+                          <th style={{ padding: "8px 12px" }}>Teacher</th>
+                          <th style={{ padding: "8px 12px" }}>School</th>
+                          <th style={{ padding: "8px 12px" }}>Status</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {invitesList.map((inv) => {
+                          const origin = window.location.origin;
+                          const link = `${origin}/register?invite=${inv.token}`;
+                          const isExpired = new Date(inv.expiresAt) < new Date();
+                          return (
+                            <tr key={inv._id} style={{ borderBottom: "1px solid #F1F5F9" }}>
+                              <td style={{ padding: "8px 12px" }}>
+                                <div style={{ fontWeight: 700, color: "#1E293B" }}>{inv.name || "Educator"}</div>
+                                <div style={{ color: "#64748B", fontSize: "11px" }}>{inv.email}</div>
+                              </td>
+                              <td style={{ padding: "8px 12px", color: "#64748B" }}>
+                                {inv.school || "—"}
+                              </td>
+                              <td style={{ padding: "8px 12px" }}>
+                                {inv.status === "used" ? (
+                                  <span style={{ background: "#DCFCE7", color: "#166534", padding: "2px 8px", borderRadius: "10px", fontWeight: 700, fontSize: "10px" }}>
+                                    ✅ Registered
+                                  </span>
+                                ) : inv.status === "revoked" ? (
+                                  <span style={{ background: "#FEE2E2", color: "#991B1B", padding: "2px 8px", borderRadius: "10px", fontWeight: 700, fontSize: "10px" }}>
+                                    ✕ Revoked
+                                  </span>
+                                ) : isExpired ? (
+                                  <span style={{ background: "#F1F5F9", color: "#64748B", padding: "2px 8px", borderRadius: "10px", fontWeight: 700, fontSize: "10px" }}>
+                                    Expired
+                                  </span>
+                                ) : (
+                                  <span style={{ background: "#FEF9C3", color: "#854D0E", padding: "2px 8px", borderRadius: "10px", fontWeight: 700, fontSize: "10px" }}>
+                                    ⏳ Pending
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ padding: "8px 12px", textAlign: "right" }}>
+                                {inv.status === "pending" && !isExpired && (
+                                  <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => copyToClipboard(link, inv._id)}
+                                      style={{
+                                        padding: "4px 8px",
+                                        borderRadius: "6px",
+                                        border: "1px solid #CBD5E1",
+                                        background: copiedToken === inv._id ? "#DCFCE7" : "#fff",
+                                        color: copiedToken === inv._id ? "#166534" : "#475569",
+                                        cursor: "pointer",
+                                        fontSize: "11px",
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      {copiedToken === inv._id ? "✓ Copied" : "Copy"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRevokeInvite(inv._id)}
+                                      style={{
+                                        padding: "4px 8px",
+                                        borderRadius: "6px",
+                                        border: "1px solid #FCA5A5",
+                                        background: "#fff",
+                                        color: "#DC2626",
+                                        cursor: "pointer",
+                                        fontSize: "11px",
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      Revoke
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
+
