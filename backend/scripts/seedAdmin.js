@@ -2,6 +2,7 @@
 // Run from backend folder: node scripts/seedAdmin.js
 require("dotenv").config();
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 const User = require("../src/models/User");
 
 async function seed() {
@@ -10,21 +11,35 @@ async function seed() {
   );
   const existing = await User.findOne({ email: "admin@vidyai.com" });
   if (existing) {
-    console.log("Admin already exists!");
+    existing.passwordHash = await bcrypt.hash("Admin@123", 12);
+    existing.role = "admin";
+    existing.isEmailVerified = true;
+    existing.isActive = true;
+    await existing.save();
+    console.log("Admin account verified and refreshed.");
   } else {
     await User.create({
       name: "VidyAI Admin",
       email: "admin@vidyai.com",
-      passwordHash: "Admin@123",
+      passwordHash: await bcrypt.hash("Admin@123", 12),
       role: "admin",
       language: "en",
+      isEmailVerified: true,
+      isActive: true,
     });
-    console.log("Admin created!");
+    console.log("Admin account created successfully!");
   }
-  console.log("Login: admin@vidyai.com / Admin@123");
+  console.log("\n==========================================");
+  console.log("VIDYAI ADMIN CREDENTIALS");
+  console.log("Email:    admin@vidyai.com");
+  console.log("Password: Admin@123");
+  console.log("Role:     admin");
+  console.log("URL:      https://vidyai-rural-learning.vercel.app/login");
+  console.log("==========================================\n");
   process.exit(0);
 }
+
 seed().catch((e) => {
-  console.error(e.message);
+  console.error("Seeding error:", e.message);
   process.exit(1);
 });
